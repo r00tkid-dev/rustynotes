@@ -538,7 +538,7 @@ impl Editor {
 fn main() -> io::Result<()> {
     let mut editor = Editor::new()?;
 
-    println!("rustynotes: a minimal note-taking tool");
+    println!("rustynotes: a simple cli note-taking tool");
     println!("type :help for commands\n");
 
     loop {
