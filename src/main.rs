@@ -1,7 +1,8 @@
-use std::io::{self, Write};
-use std::fs;
-use std::path::PathBuf;
 use chrono::Local;
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::io::{self, Write};
+use std::path::PathBuf;
 
 #[derive(Debug)]
 enum Command {
@@ -13,7 +14,10 @@ enum Command {
     Load(String),
     ListFiles,
     NewNote(bool),
-    Help,          
+    Tag(String),
+    ListTags,
+    ListByTag(String),
+    Help,
     Quit,
     Invalid(String),
 }
@@ -25,6 +29,7 @@ struct Editor {
     current_block: String,
     current_file: Option<PathBuf>,
     notes_dir: PathBuf,
+    current_tags: Vec<String>,
 }
 
 impl Editor {
@@ -40,6 +45,7 @@ impl Editor {
             current_block: String::new(),
             current_file: None,
             notes_dir,
+            current_tags: Vec::new(),
         })
     }
 
@@ -57,7 +63,10 @@ impl Editor {
                 in_section = true;
             } else if line.starts_with("- ") {
                 formatted.push_str(&format!("  {}\n", line));
-            } else if line.starts_with("HTTP/") || line.starts_with("GET ") || line.starts_with("POST ") {
+            } else if line.starts_with("HTTP/")
+                || line.starts_with("GET ")
+                || line.starts_with("POST ")
+            {
                 formatted.push_str(&format!("  > {}\n", line));
             } else if line.is_empty() {
                 formatted.push('\n');
@@ -69,9 +78,20 @@ impl Editor {
         formatted
     }
 
+    fn add_tag(&mut self, tag: String) {
+        let tag = tag.to_lowercase();
+        if !self.current_tags.contains(&tag) {
+            self.current_tags.push(tag.clone());
+            self.modified = true;
+            println!("[+] Added tag: {}", tag);
+        } else {
+            println!("[-] Tag already exists: {}", tag);
+        }
+    }
+
     fn save_current(&mut self) -> io::Result<()> {
         if !self.modified {
-            println!("No changes to save");
+            println!("[-] No changes to save");
             return Ok(());
         }
 
@@ -83,10 +103,24 @@ impl Editor {
             self.notes_dir.join(filename)
         };
 
-        fs::write(&file_path, &self.format_content())?;
+        let mut content = String::new();
+        if !self.current_tags.is_empty() {
+            content.push_str("---\ntags: ");
+            content.push_str(&self.current_tags.join(", "));
+            content.push_str("\n---\n");
+        }
+        content.push_str(&self.format_content());
+
+        fs::write(&file_path, content)?;
         self.current_file = Some(file_path.clone());
         self.modified = false;
-        println!("[+] Saved to {}", file_path.file_name().unwrap().to_string_lossy());
+        println!(
+            "[+] Saved to {}",
+            file_path.file_name().unwrap().to_string_lossy()
+        );
+        if !self.current_tags.is_empty() {
+            println!("    Tags: {}", self.current_tags.join(", "));
+        }
         Ok(())
     }
 
@@ -98,12 +132,33 @@ impl Editor {
         };
 
         if path.exists() {
-            self.content = fs::read_to_string(&path)?;
+            let content = fs::read_to_string(&path)?;
+
+            self.current_tags.clear();
+            if content.starts_with("---\n") {
+                if let Some(end) = content.find("\n---\n") {
+                    let metadata = &content[4..end];
+                    if let Some(tags) = metadata.strip_prefix("tags: ") {
+                        self.current_tags = tags.split(", ").map(|s| s.to_string()).collect();
+                        self.content = content[end + 5..].to_string();
+                    } else {
+                        self.content = content;
+                    }
+                } else {
+                    self.content = content;
+                }
+            } else {
+                self.content = content;
+            }
+
             self.current_file = Some(path.clone());
             self.modified = false;
             println!("[+] Loaded {}", path.file_name().unwrap().to_string_lossy());
+            if !self.current_tags.is_empty() {
+                println!("    Tags: {}", self.current_tags.join(", "));
+            }
         } else {
-            println!("File not found: {}", name);
+            println!("[-] File not found: {}", name);
         }
         Ok(())
     }
@@ -111,22 +166,28 @@ impl Editor {
     fn list_saved_notes(&self) -> io::Result<()> {
         println!("\nSaved Notes:");
         println!("{}", "=".repeat(40));
-        
+
         let mut notes: Vec<_> = fs::read_dir(&self.notes_dir)?
             .filter_map(|entry| entry.ok())
             .filter(|entry| entry.path().extension().map_or(false, |ext| ext == "md"))
             .collect();
-        
+
         if notes.is_empty() {
-            println!("No saved notes found.");
+            println!("[-] No saved notes found.");
             println!("{}", "=".repeat(40));
             return Ok(());
         }
 
-        notes.sort_by(|a, b| b.metadata().unwrap().modified().unwrap()
-                            .cmp(&a.metadata().unwrap().modified().unwrap()));
+        notes.sort_by(|a, b| {
+            b.metadata()
+                .unwrap()
+                .modified()
+                .unwrap()
+                .cmp(&a.metadata().unwrap().modified().unwrap())
+        });
 
-        let max_name_len = notes.iter()
+        let max_name_len = notes
+            .iter()
             .map(|entry| entry.path().file_name().unwrap().to_string_lossy().len())
             .max()
             .unwrap_or(0);
@@ -134,34 +195,136 @@ impl Editor {
         for (idx, entry) in notes.iter().enumerate() {
             let modified = entry.metadata()?.modified()?;
             let modified_time = chrono::DateTime::<Local>::from(modified);
-            let filename = entry.path().file_name().unwrap().to_string_lossy().into_owned();
-            println!("{:2}. {:<width$} ({})", 
-                    idx + 1,
-                    filename,
-                    modified_time.format("%Y-%m-%d %H:%M"),
-                    width = max_name_len);
+
+            let mut tags = Vec::new();
+            if let Ok(content) = fs::read_to_string(entry.path()) {
+                if content.starts_with("---\n") {
+                    if let Some(end) = content.find("\n---\n") {
+                        let metadata = &content[4..end];
+                        if let Some(tag_list) = metadata.strip_prefix("tags: ") {
+                            tags = tag_list.split(", ").map(|s| s.to_string()).collect();
+                        }
+                    }
+                }
+            }
+
+            let filename = entry
+                .path()
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned();
+            print!(
+                "{:2}. {:<width$} ({})",
+                idx + 1,
+                filename,
+                modified_time.format("%Y-%m-%d %H:%M"),
+                width = max_name_len
+            );
+
+            if !tags.is_empty() {
+                println!(" [{}]", tags.join(", "));
+            } else {
+                println!();
+            }
         }
         println!("{}", "=".repeat(40));
         Ok(())
     }
 
-    // New: Help command implementation
+    fn list_tags(&self) -> io::Result<()> {
+        let mut all_tags = HashSet::new();
+        let mut tag_counts = HashMap::new();
+
+        for entry in fs::read_dir(&self.notes_dir)? {
+            let entry = entry?;
+            if entry.path().extension().map_or(false, |ext| ext == "md") {
+                if let Ok(content) = fs::read_to_string(entry.path()) {
+                    if content.starts_with("---\n") {
+                        if let Some(end) = content.find("\n---\n") {
+                            let metadata = &content[4..end];
+                            if let Some(tags) = metadata.strip_prefix("tags: ") {
+                                tags.split(", ").for_each(|tag| {
+                                    all_tags.insert(tag.to_string());
+                                    *tag_counts.entry(tag.to_string()).or_insert(0) += 1;
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if all_tags.is_empty() {
+            println!("[-] No tags found");
+        } else {
+            println!("\nAvailable tags:");
+            println!("{}", "=".repeat(40));
+            let mut tags: Vec<_> = all_tags.iter().collect();
+            tags.sort();
+            for tag in tags {
+                println!("  {} ({} notes)", tag, tag_counts.get(tag).unwrap_or(&0));
+            }
+            println!("{}", "=".repeat(40));
+        }
+        Ok(())
+    }
+
+    fn list_by_tag(&self, tag: &str) -> io::Result<()> {
+        let tag = tag.to_lowercase();
+        let mut found = false;
+
+        println!("\nNotes tagged with '{}':", tag);
+        println!("{}", "=".repeat(40));
+
+        for entry in fs::read_dir(&self.notes_dir)? {
+            let entry = entry?;
+            if entry.path().extension().map_or(false, |ext| ext == "md") {
+                if let Ok(content) = fs::read_to_string(entry.path()) {
+                    if content.starts_with("---\n") {
+                        if let Some(end) = content.find("\n---\n") {
+                            let metadata = &content[4..end];
+                            if let Some(tags) = metadata.strip_prefix("tags: ") {
+                                if tags.split(", ").any(|t| t == tag) {
+                                    found = true;
+                                    println!(
+                                        "  {}",
+                                        entry.path().file_name().unwrap().to_string_lossy()
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if !found {
+            println!("[-] No notes found with tag: {}", tag);
+        }
+        println!("{}", "=".repeat(40));
+        Ok(())
+    }
+
     fn show_help(&self) {
         println!("\nCommands:");
         println!("  :quit              -> exit editor");
         println!("  :list              -> show formatted note");
         println!("  :save [name]       -> save note (with optional name)");
         println!("  :ls                -> list saved notes");
-        println!("  :load <name>       -> load note");
-        println!("  :search <text>     -> search for text");
+        println!("  :load [name]       -> load note");
+        println!("  :search [keyword]     -> search for keyword");
         println!("  :ml                -> start/end multi-line input");
         println!("  :n  / :n!          -> new note (with/without warning)");
+        println!("  :tag [name]        -> add tag to current note");
+        println!("  :tags              -> list all tags");
+        println!("  :tagged [tag]      -> list notes with specific tag");
         println!("  :help              -> show this help");
     }
 
-    fn parse_command(input: &str, in_multi_line: bool) -> Command {
+    fn parse_command(&self, input: &str, in_multi_line: bool) -> Command {
         let input = input.trim();
-        
+
         if in_multi_line {
             if input == ":ml" {
                 return Command::MultiLine;
@@ -172,13 +335,28 @@ impl Editor {
         if input.starts_with(':') {
             let parts: Vec<&str> = input[1..].split_whitespace().collect();
             match parts.get(0).map(|&s| s) {
-                Some("h") | Some("help") => Command::Help,  // New: Help command match
+                Some("h") | Some("help") => Command::Help,
                 Some("q") | Some("quit") => Command::Quit,
                 Some("l") | Some("list") => Command::List,
                 Some("ls") | Some("files") => Command::ListFiles,
                 Some("ml") => Command::MultiLine,
                 Some("n") => Command::NewNote(false),
                 Some("n!") => Command::NewNote(true),
+                Some("tag") => {
+                    if parts.len() > 1 {
+                        Command::Tag(parts[1].to_string())
+                    } else {
+                        Command::Invalid("Tag name required".to_string())
+                    }
+                }
+                Some("tags") => Command::ListTags,
+                Some("tagged") => {
+                    if parts.len() > 1 {
+                        Command::ListByTag(parts[1].to_string())
+                    } else {
+                        Command::Invalid("Tag name required".to_string())
+                    }
+                }
                 Some("search") => {
                     if parts.len() > 1 {
                         Command::Search(parts[1..].join(" "))
@@ -230,8 +408,10 @@ impl Editor {
                     self.in_multi_line = false;
                     self.content.push_str(&self.current_block);
                     self.modified = true;
-                    println!("[+] Multi-line input completed ({} lines added)", 
-                            self.current_block.lines().count());
+                    println!(
+                        "[+] Multi-line input completed ({} lines)",
+                        self.current_block.lines().count()
+                    );
                     self.current_block.clear();
                 } else {
                     println!("Multi-line mode started:");
@@ -244,36 +424,32 @@ impl Editor {
                 Ok(true)
             }
             Command::Save(name_opt) => {
-                match name_opt {
-                    Some(name) => {
-                        let file_path = self.notes_dir.join(format!("{}.md", name));
-                        fs::write(&file_path, &self.format_content())?;
-                        self.current_file = Some(file_path);
-                        self.modified = false;
-                        println!("[+] Saved as {}.md", name);
-                        println!("  Use :list to view formatted content");
-                    }
-                    None => {
-                        self.save_current()?;
-                        println!("  Use :list to view formatted content");
-                    }
+                if let Some(name) = name_opt {
+                    let file_path = self.notes_dir.join(format!("{}.md", name));
+                    fs::write(&file_path, &self.format_content())?;
+                    self.current_file = Some(file_path);
+                    self.modified = false;
+                    println!("[+] Saved as {}.md", name);
+                    println!("  Use :list to view formatted content");
+                } else {
+                    self.save_current()?;
+                    println!("  Use :list to view formatted content");
                 }
                 Ok(true)
             }
             Command::Load(name) => {
                 if self.modified {
-                    println!("Current note has unsaved changes.");
-                    println!("Save first with :save or force load with :n! then :load");
+                    println!("[-] Current note has unsaved changes.");
+                    println!("    Save first with :save or force load with :n! then :load");
                 } else {
                     self.load_file(&name)?;
-                    println!("  Use :list to view formatted content");
                 }
                 Ok(true)
             }
             Command::Search(term) => {
                 let mut found = false;
                 let mut results = Vec::new();
-                
+
                 for (i, line) in self.content.lines().enumerate() {
                     if line.contains(&term) {
                         found = true;
@@ -290,18 +466,21 @@ impl Editor {
                     println!("{}", "=".repeat(40));
                     println!("Found {} matching line(s)\n", results.len());
                 } else {
-                    println!("No matches found for '{}'\n", term);
+                    println!("[-] No matches found for '{}'\n", term);
                 }
                 Ok(true)
             }
             Command::List => {
                 if self.content.is_empty() {
-                    println!("Note is empty. Start typing to add content.");
+                    println!("[-] Note is empty");
                 } else {
-                    println!("\nCurrent note contents:");
-                    println!("{}", "=".repeat(20));
-                    println!("{}", self.format_content());
-                    println!("{}", "=".repeat(20));
+                    println!("\nCurrent note:");
+                    println!("{}", "=".repeat(40));
+                    println!("{}", self.content);
+                    if !self.current_tags.is_empty() {
+                        println!("Tags: {}", self.current_tags.join(", "));
+                    }
+                    println!("{}", "=".repeat(40));
                 }
                 Ok(true)
             }
@@ -311,20 +490,32 @@ impl Editor {
                 println!("Type ':save <name>' to save current note with a specific name");
                 Ok(true)
             }
+            Command::Tag(tag) => {
+                self.add_tag(tag);
+                Ok(true)
+            }
+            Command::ListTags => {
+                self.list_tags()?;
+                Ok(true)
+            }
+            Command::ListByTag(tag) => {
+                self.list_by_tag(&tag)?;
+                Ok(true)
+            }
             Command::NewNote(force) => {
                 if self.modified && !force {
-                    println!("Note has unsaved changes.");
-                    println!("Use :n! to start new without saving, or :save first");
+                    println!("[-] Note has unsaved changes");
+                    println!("    Use :n! to start new without saving, or :save first");
                 } else {
                     self.content.clear();
+                    self.current_tags.clear();
                     self.current_file = None;
                     self.modified = false;
-                    println!("[+] Started new note. Editor is empty.");
-                    println!("  Start typing or use :ml for multi-line input.");
+                    println!("[+] Started new note");
                 }
                 Ok(true)
             }
-            Command::Help => {    // New: Help command handling
+            Command::Help => {
                 self.show_help();
                 Ok(true)
             }
@@ -332,12 +523,12 @@ impl Editor {
                 if self.modified {
                     self.save_current()?;
                 }
-                println!("ciao.");
+                println!("[+] ciao.");
                 Ok(false)
             }
             Command::Invalid(cmd) => {
-                println!("Invalid command: {}", cmd);
-                println!("Type :help for available commands");  // Updated to mention :help
+                println!("[-] Invalid command: {}", cmd);
+                println!("    Use :help to see available commands");
                 Ok(true)
             }
         }
@@ -346,19 +537,9 @@ impl Editor {
 
 fn main() -> io::Result<()> {
     let mut editor = Editor::new()?;
-    
-    println!("rustynotes: a minimal text editor");
-    println!("Commands:");
-    println!("  :quit              -> exit editor");
-    println!("  :list              -> show formatted note");
-    println!("  :save [name]       -> save note (with optional name)");
-    println!("  :ls                -> list saved notes");
-    println!("  :load <name>       -> load note");
-    println!("  :search <text>     -> search for text");
-    println!("  :ml                -> start/end multi-line input");
-    println!("  :n  / :n!          -> new note (with/without warning)");
-    println!("\nNotes saved in: {}", editor.notes_dir.display());
-    println!("Type :ls to see saved notes\n");
+
+    println!("rustynotes: a minimal text editor v0.1.1");
+    println!("type :help for commands\n");
 
     loop {
         if editor.in_multi_line {
@@ -371,7 +552,7 @@ fn main() -> io::Result<()> {
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
 
-        let command = Editor::parse_command(&input, editor.in_multi_line);
+        let command = editor.parse_command(&input, editor.in_multi_line);
         if !editor.execute_command(command)? {
             break;
         }
