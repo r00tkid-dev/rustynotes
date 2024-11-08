@@ -19,15 +19,20 @@
                                              \|_________|
 ```
 
-## General Commands:
+## Commands:
 ```
-- :quit          -> Exit the editor.
-- :list          -> Show current note in a formatted view.
-- :save [name]   -> Save the current note, optional name.
-- :ls            -> List all saved notes.
-- :load [name]   -> Load a note by its name.
-- :search [term] -> Search through all notes for the given term.
-- :ml            -> Start multi-line input mode, end with `:ml`.
+  :quit              -> exit editor
+  :list              -> show formatted note
+  :save [name]       -> save note (with optional name)
+  :ls                -> list saved notes
+  :load [name]       -> load note
+  :search [keyword]     -> search for keyword
+  :ml                -> start/end multi-line input
+  :n  / :n!          -> new note (with/without warning)
+  :tag [name]        -> add tag to current note
+  :tags              -> list all tags
+  :tagged [tag]      -> list notes with specific tag
+  :help              -> show this help
 ```
 ## New Note:
 ```
@@ -41,7 +46,6 @@
 ```
 
 ## File Management:
-- Saved notes are stored in: `/home/user/.notes`.
 ```
 - :load [name]   -> Load an existing note by its name.
 - :ls            -> List all saved notes in the directory with timestamps.
@@ -52,14 +56,21 @@
 ```
 - :search [term] -> Search through all saved notes for the specified term.
 ```
+## Tagging:
+```
+- :tag [name]    -> Adds desired tag to current note
+- :tags          -> Lists all tags.
+- :tagged [tag]  -> Lists all notes with the specified tag 
+```
 
 ## Multi-line Input:
 - Each line entered in multi-line mode gets appended to the current note.
 - Write your note and end with `:ml` to stop.
 ```
 - :ml            -> Enter multi-line mode.
+- :ml            -> Close multi-line mode.
 ```
 
 ## Miscellaneous:
-- Notes are saved in `.md` format by default.
+- Notes are saved in `.md` format by default, in: `/home/user/.notes`.
 - Timestamps are attached to each saved note (e.g., `note1.md (2024-11-08 01:08)`).
