@@ -13,6 +13,7 @@ enum Command {
     Load(String),
     ListFiles,
     NewNote(bool),
+    Help,          
     Quit,
     Invalid(String),
 }
@@ -85,7 +86,7 @@ impl Editor {
         fs::write(&file_path, &self.format_content())?;
         self.current_file = Some(file_path.clone());
         self.modified = false;
-        println!("✓ Saved to {}", file_path.file_name().unwrap().to_string_lossy());
+        println!("[+] Saved to {}", file_path.file_name().unwrap().to_string_lossy());
         Ok(())
     }
 
@@ -100,7 +101,7 @@ impl Editor {
             self.content = fs::read_to_string(&path)?;
             self.current_file = Some(path.clone());
             self.modified = false;
-            println!("✓ Loaded {}", path.file_name().unwrap().to_string_lossy());
+            println!("[+] Loaded {}", path.file_name().unwrap().to_string_lossy());
         } else {
             println!("File not found: {}", name);
         }
@@ -109,12 +110,19 @@ impl Editor {
 
     fn list_saved_notes(&self) -> io::Result<()> {
         println!("\nSaved Notes:");
-        println!("------------");
+        println!("{}", "=".repeat(40));
+        
         let mut notes: Vec<_> = fs::read_dir(&self.notes_dir)?
             .filter_map(|entry| entry.ok())
             .filter(|entry| entry.path().extension().map_or(false, |ext| ext == "md"))
             .collect();
         
+        if notes.is_empty() {
+            println!("No saved notes found.");
+            println!("{}", "=".repeat(40));
+            return Ok(());
+        }
+
         notes.sort_by(|a, b| b.metadata().unwrap().modified().unwrap()
                             .cmp(&a.metadata().unwrap().modified().unwrap()));
 
@@ -133,8 +141,22 @@ impl Editor {
                     modified_time.format("%Y-%m-%d %H:%M"),
                     width = max_name_len);
         }
-        println!();
+        println!("{}", "=".repeat(40));
         Ok(())
+    }
+
+    // New: Help command implementation
+    fn show_help(&self) {
+        println!("\nCommands:");
+        println!("  :quit              -> exit editor");
+        println!("  :list              -> show formatted note");
+        println!("  :save [name]       -> save note (with optional name)");
+        println!("  :ls                -> list saved notes");
+        println!("  :load <name>       -> load note");
+        println!("  :search <text>     -> search for text");
+        println!("  :ml                -> start/end multi-line input");
+        println!("  :n  / :n!          -> new note (with/without warning)");
+        println!("  :help              -> show this help");
     }
 
     fn parse_command(input: &str, in_multi_line: bool) -> Command {
@@ -150,6 +172,7 @@ impl Editor {
         if input.starts_with(':') {
             let parts: Vec<&str> = input[1..].split_whitespace().collect();
             match parts.get(0).map(|&s| s) {
+                Some("h") | Some("help") => Command::Help,  // New: Help command match
                 Some("q") | Some("quit") => Command::Quit,
                 Some("l") | Some("list") => Command::List,
                 Some("ls") | Some("files") => Command::ListFiles,
@@ -190,14 +213,14 @@ impl Editor {
                 if self.in_multi_line {
                     self.current_block.push_str(&text);
                     self.current_block.push('\n');
-                    print!("... ");
+                    print!("  ");
                     io::stdout().flush()?;
                 } else {
                     if !text.is_empty() {
                         self.content.push_str(&text);
                         self.content.push('\n');
                         self.modified = true;
-                        println!("✓ Added");
+                        println!("[+] Added");
                     }
                 }
                 Ok(true)
@@ -207,10 +230,14 @@ impl Editor {
                     self.in_multi_line = false;
                     self.content.push_str(&self.current_block);
                     self.modified = true;
-                    println!("✓ Multi-line block added");
+                    println!("[+] Multi-line input completed ({} lines added)", 
+                            self.current_block.lines().count());
                     self.current_block.clear();
                 } else {
-                    println!("Multi-line mode (end with :ml)");
+                    println!("Multi-line mode started:");
+                    println!("  Type your content (one line at a time)");
+                    println!("  Use :ml again to finish");
+                    println!("---");
                     self.in_multi_line = true;
                     self.current_block.clear();
                 }
@@ -223,58 +250,94 @@ impl Editor {
                         fs::write(&file_path, &self.format_content())?;
                         self.current_file = Some(file_path);
                         self.modified = false;
-                        println!("✓ Saved as {}.md", name);
+                        println!("[+] Saved as {}.md", name);
+                        println!("  Use :list to view formatted content");
                     }
-                    None => self.save_current()?
+                    None => {
+                        self.save_current()?;
+                        println!("  Use :list to view formatted content");
+                    }
                 }
                 Ok(true)
             }
             Command::Load(name) => {
-                self.load_file(&name)?;
+                if self.modified {
+                    println!("Current note has unsaved changes.");
+                    println!("Save first with :save or force load with :n! then :load");
+                } else {
+                    self.load_file(&name)?;
+                    println!("  Use :list to view formatted content");
+                }
                 Ok(true)
             }
             Command::Search(term) => {
                 let mut found = false;
+                let mut results = Vec::new();
+                
                 for (i, line) in self.content.lines().enumerate() {
                     if line.contains(&term) {
-                        if !found {
-                            println!("Search results for '{}':", term);
-                            found = true;
-                        }
-                        println!("  {:>4}: {}", i + 1, line);
+                        found = true;
+                        results.push((i + 1, line));
                     }
                 }
-                if !found {
-                    println!("No matches found for '{}'", term);
+
+                if found {
+                    println!("\nSearch results for '{}':", term);
+                    println!("{}", "=".repeat(40));
+                    for (line_num, content) in &results {
+                        println!("{:>4}: {}", line_num, content);
+                    }
+                    println!("{}", "=".repeat(40));
+                    println!("Found {} matching line(s)\n", results.len());
+                } else {
+                    println!("No matches found for '{}'\n", term);
                 }
                 Ok(true)
             }
             Command::List => {
                 if self.content.is_empty() {
-                    println!("Note is empty");
+                    println!("Note is empty. Start typing to add content.");
                 } else {
+                    println!("\nCurrent note contents:");
+                    println!("{}", "=".repeat(20));
                     println!("{}", self.format_content());
+                    println!("{}", "=".repeat(20));
                 }
                 Ok(true)
             }
             Command::ListFiles => {
                 self.list_saved_notes()?;
+                println!("Type ':load <name>' to load a note");
+                println!("Type ':save <name>' to save current note with a specific name");
                 Ok(true)
             }
             Command::NewNote(force) => {
                 if self.modified && !force {
-                    println!("Note has unsaved changes. Use :n! to create new without saving, or :save first");
+                    println!("Note has unsaved changes.");
+                    println!("Use :n! to start new without saving, or :save first");
                 } else {
                     self.content.clear();
                     self.current_file = None;
                     self.modified = false;
-                    println!("Started new note");
+                    println!("[+] Started new note. Editor is empty.");
+                    println!("  Start typing or use :ml for multi-line input.");
                 }
                 Ok(true)
             }
-            Command::Quit => Ok(false),
+            Command::Help => {    // New: Help command handling
+                self.show_help();
+                Ok(true)
+            }
+            Command::Quit => {
+                if self.modified {
+                    self.save_current()?;
+                }
+                println!("ciao.");
+                Ok(false)
+            }
             Command::Invalid(cmd) => {
                 println!("Invalid command: {}", cmd);
+                println!("Type :help for available commands");  // Updated to mention :help
                 Ok(true)
             }
         }
@@ -284,7 +347,7 @@ impl Editor {
 fn main() -> io::Result<()> {
     let mut editor = Editor::new()?;
     
-    println!("Minimal Text Editor");
+    println!("rustynotes: a minimal text editor");
     println!("Commands:");
     println!("  :quit              -> exit editor");
     println!("  :list              -> show formatted note");
@@ -299,7 +362,7 @@ fn main() -> io::Result<()> {
 
     loop {
         if editor.in_multi_line {
-            print!("... ");
+            print!("  ");
         } else {
             print!(":> ");
         }
@@ -310,9 +373,6 @@ fn main() -> io::Result<()> {
 
         let command = Editor::parse_command(&input, editor.in_multi_line);
         if !editor.execute_command(command)? {
-            if editor.modified {
-                editor.save_current()?;
-            }
             break;
         }
     }
