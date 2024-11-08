@@ -96,4 +96,29 @@ Found in 3 notes:
 2. target2.md:
    | RCE through deserialization...
    | Impact: Critical...
+
+8. Export
+:> export --tag bug-bounty --format md
+:> export --search "IDOR" --format pdf
+
+9. Quickie mode
+# Quick capture with custom filename
+:> quick "Found IDOR in /api/users/{id}" --save vuln1.md
+[+] Saved to vuln1.md
+
+# Quick capture with filename and tags
+:> quick "Found IDOR in /api/users/{id}" --save idor-finding.md --tag bug,idor
+[+] Saved to idor-finding.md with tags: bug, idor
+
+# Quick capture and append to existing note
+:> quick "Testing another ID: /api/users/2" --add vuln1.md
+[+] Appended to vuln1.md
+
+# Quick capture with timestamp prefix
+:> quick "Meeting notes with client" --save "meeting.md" --timestamp
+[+] Saved to 2024-02-08_meeting.md
+
+# Quick capture to specific template
+:> quick "IDOR vulnerability" --template bug-report --save idor.md
+[+] Created from bug-report template and saved to idor.md
 ```
