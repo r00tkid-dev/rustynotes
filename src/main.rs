@@ -1,3 +1,4 @@
+use std::time::SystemTime;
 use chrono::Local;
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -8,6 +9,7 @@ use std::path::PathBuf;
 enum Command {
     Write(String),
     Search(String),
+    Stats,
     List,
     MultiLine,
     Save(Option<String>),
@@ -22,8 +24,20 @@ enum Command {
     Invalid(String),
 }
 
+struct NoteStats {
+    lines: usize,
+    words: usize,
+    chars: usize,
+    size_bytes: u64,
+    last_modified: String,
+    total_notes: usize,
+    total_size: String,
+    top_tags: Vec<(String, usize)>,
+}
+
 struct Editor {
     content: String,
+    stats_cache: Option<NoteStats>,
     modified: bool,
     in_multi_line: bool,
     current_block: String,
@@ -44,6 +58,7 @@ impl Editor {
             in_multi_line: false,
             current_block: String::new(),
             current_file: None,
+            stats_cache: None,
             notes_dir,
             current_tags: Vec::new(),
         })
@@ -76,6 +91,128 @@ impl Editor {
         }
 
         formatted
+    }
+    fn calculate_stats(&mut self) -> io::Result<NoteStats> {
+        let content = &self.content;
+        let lines = content.lines().count();
+        let words = content.split_whitespace().count();
+        let chars = content.chars().count();
+        let size_bytes = if let Some(path) = &self.current_file {
+            fs::metadata(path)?.len()
+        } else {
+            0
+        };
+
+        let last_modified = if let Some(path) = &self.current_file {
+            let metadata = fs::metadata(path)?;
+            let time = metadata.modified()?;
+            format!("{}", chrono::DateTime::<Local>::from(time).format("%Y-%m-%d %H:%M"))
+        } else {
+            "Not saved yet".to_string()
+        };
+
+        let mut total_size = 0;
+        let mut total_notes = 0;
+        let mut tag_counts = HashMap::new();
+
+        for entry in fs::read_dir(&self.notes_dir)? {
+            let entry = entry?;
+            if entry.path().extension().map_or(false, |ext| ext == "md") {
+                total_notes += 1;
+                total_size += entry.metadata()?.len();
+
+                // Count tags
+                if let Ok(content) = fs::read_to_string(entry.path()) {
+                    if content.starts_with("---\n") {
+                        if let Some(end) = content.find("\n---\n") {
+                            let metadata = &content[4..end];
+                            if let Some(tags) = metadata.strip_prefix("tags: ") {
+                                for tag in tags.split(", ") {
+                                    *tag_counts.entry(tag.to_string()).or_insert(0) += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut top_tags: Vec<_> = tag_counts.into_iter().collect();
+        top_tags.sort_by(|a, b| b.1.cmp(&a.1));
+        top_tags.truncate(2);
+
+        let total_size_str = if total_size < 1024 {
+            format!("{}B", total_size)
+        } else if total_size < 1024 * 1024 {
+            format!("{:.1}KB", total_size as f64 / 1024.0)
+        } else {
+            format!("{:.1}MB", total_size as f64 / (1024.0 * 1024.0))
+        };
+
+        Ok(NoteStats {
+            lines,
+            words,
+            chars,
+            size_bytes,
+            last_modified,
+            total_notes,
+            total_size: total_size_str,
+            top_tags,
+        })
+    }
+
+     fn display_stats(&mut self) -> io::Result<()> {
+        let stats = if let Some(ref stats) = self.stats_cache {
+            stats
+        } else {
+            self.stats_cache = Some(self.calculate_stats()?);
+            self.stats_cache.as_ref().unwrap()
+        };
+
+         // Display banner
+        println!("\n ██▀███   █    ██  ██████ ▄▄▄█████▓██   ██▓ 
+▓██ ▒ ██▒ ██  ▓██▒██    ▒ ▓  ██▒ ▓▒▒██  ██▒ 
+▓██ ░▄█ ▒▓██  ▒██░ ▓██▄   ▒ ▓██░ ▒░ ▒██ ██░ 
+▒██▀▀█▄  ▓▓█  ░██░ ▒   ██▒░ ▓██▓ ░  ░ ▐██▓░ 
+░██▓ ▒██▒▒▒█████▓▒██████▒▒  ▒██▒ ░  ░ ██▒▓░ 
+░ ▒▓ ░▒▓░░▒▓▒ ▒ ▒▒ ▒▓▒ ▒ ░  ▒ ░░     ██▒▒▒  
+  ░▒ ░ ▒░░░▒░ ░ ░░ ░▒  ░ ░    ░    ▓██ ░▒░  
+  ░░   ░  ░░░ ░ ░░  ░  ░    ░      ▒ ▒ ░░   
+   ░        ░          ░           ░ ░      
+                                   ░ ░      
+ ███▄    █ ▒█████  ▄▄▄█████▓▓█████   ██████ 
+ ██ ▀█   █▒██▒  ██▒▓  ██▒ ▓▒▓█   ▀ ▒██    ▒ 
+▓██  ▀█ ██▒██░  ██▒▒ ▓██░ ▒░▒███   ░ ▓██▄   
+▓██▒  ▐▌██▒██   ██░░ ▓██▓ ░ ▒▓█  ▄   ▒   ██▒
+▒██░   ▓██░ ████▓▒░  ▒██▒ ░ ░▒████▒▒██████▒▒
+░ ▒░   ▒ ▒░ ▒░▒░▒░   ▒ ░░   ░░ ▒░ ░▒ ▒▓▒ ▒ ░
+░ ░░   ░ ▒░ ░ ▒ ▒░     ░     ░ ░  ░░ ░▒  ░ ░
+   ░   ░ ░░ ░ ░ ▒    ░         ░   ░  ░  ░  
+         ░    ░ ░              ░  ░      ░  \n");
+
+        // Display stats
+        if let Some(ref path) = self.current_file {
+            println!("Current Note: {}", path.file_name().unwrap().to_string_lossy());
+        } else {
+            println!("Current Note: [Not saved]");
+        }
+        println!("Lines: {}", stats.lines);
+        println!("Words: {}", stats.words);
+        println!("Characters: {}", stats.chars);
+        println!("Size: {}", stats.size_bytes);
+        println!("All-Time Notes: {}", stats.total_notes);
+        println!("Last Modified: {}", stats.last_modified);
+        println!("Total Size: {}", stats.total_size);
+        if !stats.top_tags.is_empty() {
+            println!("Most Used Tags: {}",
+                stats.top_tags.iter()
+                    .map(|(tag, count)| format!("{} ({})", tag, count))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+        println!();
+        Ok(())
     }
 
     fn add_tag(&mut self, tag: String) {
@@ -308,23 +445,23 @@ impl Editor {
 
     fn show_help(&self) {
         println!("\nCommands:");
-        println!("  :quit              -> exit editor");
+        println!("  :stats             -> show statistics");
         println!("  :list              -> show formatted note");
-        println!("  :save [name]       -> save note (with optional name)");
         println!("  :ls                -> list saved notes");
         println!("  :load [name]       -> load note");
-        println!("  :search [keyword]     -> search for keyword");
-        println!("  :ml                -> start/end multi-line input");
         println!("  :n  / :n!          -> new note (with/without warning)");
+        println!("  :ml                -> start/end multi-line input");
+        println!("  :save [name]       -> save note (with optional name)");
+        println!("  :search [keyword]  -> search for keyword");
         println!("  :tag [name]        -> add tag to current note");
         println!("  :tags              -> list all tags");
         println!("  :tagged [tag]      -> list notes with specific tag");
         println!("  :help              -> show this help");
+        println!("  :quit              -> exit editor");
     }
 
     fn parse_command(&self, input: &str, in_multi_line: bool) -> Command {
         let input = input.trim();
-
         if in_multi_line {
             if input == ":ml" {
                 return Command::MultiLine;
@@ -342,6 +479,7 @@ impl Editor {
                 Some("ml") => Command::MultiLine,
                 Some("n") => Command::NewNote(false),
                 Some("n!") => Command::NewNote(true),
+                Some("stats") => Command::Stats,
                 Some("tag") => {
                     if parts.len() > 1 {
                         Command::Tag(parts[1].to_string())
@@ -387,6 +525,10 @@ impl Editor {
 
     fn execute_command(&mut self, command: Command) -> io::Result<bool> {
         match command {
+            Command::Stats => {
+                self.display_stats()?;
+                Ok(true)
+            }
             Command::Write(text) => {
                 if self.in_multi_line {
                     self.current_block.push_str(&text);
