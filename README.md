@@ -17,22 +17,23 @@
    \ \__\\ \__\ \_______\   \ \__\ \ \_______\____\_\  \ 
     \|__| \|__|\|_______|    \|__|  \|_______|\_________\
                                              \|_________|
+- by r00tkid
 ```
 
 ## Commands:
 ```
-  :quit              -> exit editor
+  :help              -> show this help page
   :list              -> show formatted note
-  :save [name]       -> save note (with optional name)
-  :ls                -> list saved notes
   :load [name]       -> load note
-  :search [keyword]     -> search for keyword
+  :ls                -> list saved notes
   :ml                -> start/end multi-line input
   :n  / :n!          -> new note (with/without warning)
+  :save [name]       -> save note (with optional name)
+  :search [keyword]  -> search for keyword
   :tag [name]        -> add tag to current note
   :tags              -> list all tags
   :tagged [tag]      -> list notes with specific tag
-  :help              -> show this help
+  :quit              -> exit editor
 ```
 ## New Note:
 ```
