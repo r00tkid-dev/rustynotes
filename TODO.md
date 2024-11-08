@@ -1,41 +1,99 @@
 ```
-1. Undo/Redo Functionality
-Implement an undo/redo stack to keep track of changes made to the note content, allowing users to revert to a previous state or redo an undone change.
-
-2. Tagging/Organization for Notes
+1. Tagging/Organization for Notes [DONE]
 Add a simple tagging system or directory structure within .notes folder. 
-For example: 
-:tag <tag_name> or :move <note> <folder> could allow users to organize notes better.
 
-3. Search Enhancements
-Enhance the search functionality by allowing searching across multiple notes or even by date range or tags. 
-For example: 
-:search <term> --all to search across all notes.
+2. Search Enhancements
+- fuzzy search:
+:> search authntication  # Misspelled
+Did you mean "authentication"?
+Found in 3 notes...
 
-4. Autosave Customization
-Allow users to toggle autosave on/off or set the frequency of autosave. 
-For example: 
-:autosave on or :autosave 5 to save every 5 minutes.
+- regex:
+:> search --regex "CVE-\d{4}-\d{4,7}"
+# Finds all CVE patterns like CVE-2024-12345
 
-5. File Preview (Quick View)
-Add a :preview <note> command to show a brief snippet (first few lines) of a note’s content.
-- Floating Window would be nice...
+- content-based:
+:> search --urls        # Find all URLs in notes
+:> search --code php    # Find PHP code blocks
+:> search --headers     # Find HTTP headers
 
-6. Custom File Extensions
+3. Command History (History of previous inputs)
+- store in memroy vs persist between sessions (.rustynotes_history)?
+up and down arrow keys
 
-7. Settings/Preferences Menu
-- Autosave intervals
-- Whether multi-line mode is active by default
-- Whether commands like :list show more or fewer notes at once
-
-8. Command History (History of previous inputs)
-
-9. Find and Replace
+4. Find and Replace
 Implement a :find <term> command to search for a term, and a :replace <term> <replacement> to replace all occurrences of that term. It could also allow for case-sensitive or whole-word-only search options.
 
-10. Code Folding
-Implement a folding mechanism where users can collapse/expand sections of code. For example, the user could press :fold to collapse a block and :unfold to reveal it again. It could work based on indentation or specific markers like /* fold start */ and /* fold end */.
+5. Note templates
+:> template list
+Available templates:
+* bug-bounty
+* research
+* general notes
 
-11. Syntax Highlighting (Not sure/ Low Prio)
-Detect the language based on file extension (e.g., .js for JavaScript, .py for Python) and highlight keywords, variables, and syntax in the appropriate color.
+:> new --template bug-bounty
+[Creates new note with structure:]
+# Target: 
+## Scope:
+
+- user-defined (~/.notes/templates)?
+# Save current note as template
+:> save-template bug-report
+
+# List templates
+:> templates
+User templates:
+  - bug-report.md
+  - recon.md
+Default templates:
+  - basic.md
+  - meeting.md
+
+# Use template
+:> new bug-report
+
+# with flags
+:> new bug-report --target example.com
+# Automatically fills $target
+
+6. Note stats
+:> stats current
+Current note:
+- Lines: 156
+- Words: 423
+- Characters: 2,145
+- Code blocks: 3
+- Last modified: 2 hours ago
+
+:> stats all
+All notes:
+- Total notes: 23
+- Total size: 1.2MB
+- Most used tags: bug-bounty (15), web (10)
+- Most active day: Thursday
+
+7. Preview 
+:> ls
+1. target1-notes.md (2024-02-08 14:30)
+2. target2-recon.md (2024-02-08 15:45)
+
+:> preview 1
+--- target1-notes.md ---
+Target: example.com
+Scope: *.example.com
+Tags: web, recon
+
+[Press any key to exit preview]
+
+- split preview?
+:> search rce --preview
+Found in 3 notes:
+
+1. target1.md:
+   | ...found RCE in the upload endpoint...
+   | POC: curl -X POST...
+
+2. target2.md:
+   | RCE through deserialization...
+   | Impact: Critical...
 ```
