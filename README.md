@@ -17,24 +17,46 @@
    \ \__\\ \__\ \_______\   \ \__\ \ \_______\____\_\  \ 
     \|__| \|__|\|_______|    \|__|  \|_______|\_________\
                                              \|_________|
-- by r00tkid
+                                              - by r00tkid
 
 A minimalist approach to note-taking necessities in the command-line. 
 ```
 ## Installation
+### Downloading the Binary
+
+*Navigate to the [Releases](https://github.com/r00tkid-dev/rustynotes/releases) page.*
+
+*Download the appropriate binary for your operating system (Windows, macOS, Linux).*
+
+### Extracting the Binary
+
+*Extract the downloaded archive to a directory of your choice.*
+
+### Running the Binary
+
+*Open your terminal or command prompt.*
+
+*Navigate to the directory where you extracted the binary.*
+
+*Run the binary by executing the following command:*
+`./rustynotes`
+
+*ps. for MacOS and Linux you will need to add execution rights to the binary by running the following command:*
+`sudo chmod +x rustynotes`
 
 ## Commands:
 ```
-  :help              -> show this help page
-  :list              -> show formatted note
-  :load [name]       -> load note
-  :ls                -> list saved notes
-  :ml                -> start/end multi-line input
-  :n  / :n!          -> new note (with/without warning)
-  :save [name]       -> save note (with optional name)
-  :search [keyword]  -> search for keyword
-  :tag [name]        -> add tag to current note
-  :tags              -> list all tags
-  :tagged [tag]      -> list notes with specific tag
-  :quit              -> exit editor
+:help              ► show this help
+:quit              ► exit editor
+:n  / :n!          ► new note (with/without warning)
+:save [name]       ► save note (with optional name)
+:load [name]       ► load note
+:ls                ► list saved notes
+:list              ► show formatted note
+:stats             ► show note statistics
+:tag [name]        ► add tag to current note
+:tags              ► list all tags
+:tagged [tag]      ► list notes with specific tag
+:search [keyword]  ► search for keyword
+:ml                ► start/end multi-line input
 ```
