@@ -602,19 +602,19 @@ impl Editor {
 
     fn show_help(&self) {
         println!("\nCommands:");
-        println!("  :stats             -> show note statistics");
-        println!("  :list              -> show formatted note");
-        println!("  :ls                -> list saved notes");
-        println!("  :ml                -> start/end multi-line input");
-        println!("  :n  / :n!          -> new note (with/without warning)");
-        println!("  :save [name]       -> save note (with optional name)");
-        println!("  :load [name]       -> load note");
-        println!("  :search [keyword]  -> search for keyword");
-        println!("  :tag [name]        -> add tag to current note");
-        println!("  :tags              -> list all tags");
-        println!("  :tagged [tag]      -> list notes with specific tag");
-        println!("  :help              -> show this help");
-        println!("  :quit              -> exit editor");
+        println!("  :help              ► show available commands");
+        println!("  :quit              ► exit editor");
+        println!("  :n  / :n!          ► new note (with/without warning)");
+        println!("  :save [name]       ► save note (with optional name)");
+        println!("  :load [name]       ► load note");
+        println!("  :ls                ► list saved notes");
+        println!("  :list              ► show formatted note");
+        println!("  :stats             ► show note statistics");
+        println!("  :tag [name]        ► add tag to current note");
+        println!("  :tags              ► list all tags");
+        println!("  :tagged [tag]      ► list notes with specific tag");
+        println!("  :search [keyword]  ► search for keyword");
+        println!("  :ml                ► start/end multi-line input");
     }
 
     fn list_saved_notes(&self) -> io::Result<()> {
