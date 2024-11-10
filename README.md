@@ -46,17 +46,21 @@ A minimalist approach to note-taking necessities in the command-line.
 
 ## Commands:
 ```
-:help              ► show this help
-:quit              ► exit editor
-:n  / :n!          ► new note (with/without warning)
-:save [name]       ► save note (with optional name)
-:load [name]       ► load note
-:ls                ► list saved notes
-:list              ► show formatted note
-:stats             ► show note statistics
-:tag [name]        ► add tag to current note
-:tags              ► list all tags
-:tagged [tag]      ► list notes with specific tag
-:search [keyword]  ► search for keyword
-:ml                ► start/end multi-line input
+:quit               ► exit rustynotes
+:n  / :n!           ► new note (with/without warning)
+:save [name]        ► save note (with optional name)
+:load [name]        ► load note
+:ls                 ► list saved notes
+:list               ► show current note
+:stats              ► show note statistics
+:tag [name]         ► add tag to current note
+  :tags             ► list all tags
+  :tagged [tag]     ► list notes with specific tag
+:search [keyword]   ► search for keyword
+:ml                 ► start/end multi-line input
+:edit               ► start edit mode
+  :line N           ► select line to edit
+  :save             ► save changes
+  :cancel           ► discard changes
+                                 ↳ written by r00tkid
 ```
