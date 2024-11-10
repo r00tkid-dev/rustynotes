@@ -17,7 +17,7 @@ Found in 3 notes...
 :> search --code php    # Find PHP code blocks
 :> search --headers     # Find HTTP headers
 
-3. Command History (History of previous inputs)
+3. Command History (History of previous inputs) [80% need to make it persistant]
 - store in memroy vs persist between sessions (.rustynotes_history)?
 up and down arrow keys
 
@@ -56,7 +56,7 @@ Default templates:
 :> new bug-report --target example.com
 # Automatically fills $target
 
-6. Note stats
+6. Note stats [DONE - combined the 2 in 1]
 :> stats current
 Current note:
 - Lines: 156

@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 dirs = "5.0"
 chrono = "0.4"
+rustyline = "12.0.0"
 
 [profile.release]
 opt-level = 3
