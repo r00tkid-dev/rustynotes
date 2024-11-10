@@ -1,4 +1,6 @@
 use chrono::{DateTime, Local};
+use rustyline::error::ReadlineError;
+use rustyline::Editor as LineEditor;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{self, Write};
@@ -10,6 +12,10 @@ enum Command {
     Search(String),
     List,
     MultiLine,
+    Edit,
+    EditLine(usize),
+    EditSave,
+    EditCancel,
     Save(Option<String>),
     Load(String),
     ListFiles,
@@ -33,8 +39,6 @@ struct NoteStats {
     total_notes: usize,
     total_size: String,
     top_tags: Vec<(String, usize)>,
-    session_changes: usize,
-    session_start: DateTime<Local>,
 }
 
 struct Editor {
@@ -47,11 +51,13 @@ struct Editor {
     current_tags: Vec<String>,
     stats_cache: Option<NoteStats>,
     stats_dirty: bool,
+    edit_mode: bool,
+    edit_buffer: Vec<String>,
 }
 
 impl Editor {
     fn new() -> io::Result<Self> {
-        let home = dirs::home_dir().expect("Could not find home directory");
+        let home = dirs::home_dir().expect("could not find home directory");
         let notes_dir = home.join(".notes");
         fs::create_dir_all(&notes_dir)?;
 
@@ -65,6 +71,8 @@ impl Editor {
             current_tags: Vec::new(),
             stats_cache: None,
             stats_dirty: true,
+            edit_mode: false,
+            edit_buffer: Vec::new(),
         })
     }
 
@@ -103,12 +111,12 @@ impl Editor {
             self.current_file = Some(path.clone());
             self.modified = false;
             self.invalidate_stats_cache();
-            println!("[+] Loaded {}", path.file_name().unwrap().to_string_lossy());
+            println!("[+] loaded {}", path.file_name().unwrap().to_string_lossy());
             if !self.current_tags.is_empty() {
-                println!("    Tags: {}", self.current_tags.join(", "));
+                println!("    tags: {}", self.current_tags.join(", "));
             }
         } else {
-            println!("[-] File not found: {}", name);
+            println!("[-] file not found: {}", name);
         }
         Ok(())
     }
@@ -129,10 +137,10 @@ impl Editor {
                         "Unknown".to_string()
                     },
                 ),
-                Err(_) => (content.len() as u64, "Not saved yet".to_string()),
+                Err(_) => (content.len() as u64, "not saved yet".to_string()),
             }
         } else {
-            (content.len() as u64, "Not saved yet".to_string())
+            (content.len() as u64, "not saved yet".to_string())
         };
 
         let mut total_size = size_bytes;
@@ -197,8 +205,6 @@ impl Editor {
             total_notes,
             total_size: total_size_str,
             top_tags,
-            session_changes: 0,
-            session_start: Local::now(),
         };
 
         Ok(stats)
@@ -222,14 +228,14 @@ impl Editor {
                 if let Some(ref path) = self.current_file {
                     path.file_name().unwrap().to_string_lossy()
                 } else {
-                    "[Not saved]".into()
+                    "[not saved]".into()
                 }
             ),
-            format!("Lines: {}", stats.lines),
-            format!("Words: {}", stats.words),
-            format!("Characters: {}", stats.chars),
+            format!("lines: {}", stats.lines),
+            format!("words: {}", stats.words),
+            format!("characters: {}", stats.chars),
             format!(
-                "Size: {}",
+                "size: {}",
                 if stats.size_bytes < 1024 {
                     format!("{}B", stats.size_bytes)
                 } else if stats.size_bytes < 1024 * 1024 {
@@ -238,14 +244,14 @@ impl Editor {
                     format!("{:.1}MB", stats.size_bytes as f64 / (1024.0 * 1024.0))
                 }
             ),
-            format!("All-Time Notes: {}", stats.total_notes),
-            format!("Last Modified: {}", stats.last_modified),
-            format!("Total Size: {}", stats.total_size),
+            format!("all-time notes: {}", stats.total_notes),
+            format!("last modified: {}", stats.last_modified),
+            format!("total size: {}", stats.total_size),
         ];
 
         if !stats.top_tags.is_empty() {
             stats_lines.push(format!(
-                "Most Used Tags: {}",
+                "most used tags: {}",
                 stats
                     .top_tags
                     .iter()
@@ -336,15 +342,15 @@ impl Editor {
             self.current_tags.push(tag.clone());
             self.modified = true;
             self.invalidate_stats_cache();
-            println!("[+] Added tag: {}", tag);
+            println!("[+] added tag: {}", tag);
         } else {
-            println!("[-] Tag already exists: {}", tag);
+            println!("[-] tag already exists: {}", tag);
         }
     }
 
     fn save_current(&mut self) -> io::Result<()> {
         if !self.modified {
-            println!("[-] No changes to save");
+            println!("[-] no changes to save");
             return Ok(());
         }
 
@@ -369,13 +375,83 @@ impl Editor {
         self.modified = false;
         self.invalidate_stats_cache();
         println!(
-            "[+] Saved to {}",
+            "[+] saved to {}",
             file_path.file_name().unwrap().to_string_lossy()
         );
         if !self.current_tags.is_empty() {
-            println!("    Tags: {}", self.current_tags.join(", "));
+            println!("    tags: {}", self.current_tags.join(", "));
         }
         Ok(())
+    }
+    fn enter_edit_mode(&mut self) {
+        self.edit_mode = true;
+        self.edit_buffer = self.content.lines().map(String::from).collect();
+        println!("\n edit mode commands:");
+        println!("  :line N      - edit line N");
+        println!("  :save        - save changes");
+        println!("  :cancel      - discard changes");
+        self.display_numbered_content();
+    }
+
+    fn display_numbered_content(&self) {
+        println!("\ncurrent content:");
+        println!("{}", "=".repeat(40));
+        for (i, line) in self.edit_buffer.iter().enumerate() {
+            println!("{:4}: {}", i + 1, line);
+        }
+        println!("{}", "=".repeat(40));
+    }
+
+    fn edit_line(&mut self, line_num: usize) -> io::Result<()> {
+        if line_num == 0 || line_num > self.edit_buffer.len() {
+            println!("[-] invalid line");
+            return Ok(());
+        }
+        let line_idx = line_num - 1;
+        let current_line = &self.edit_buffer[line_idx];
+        println!("editing line {}:", line_num);
+        println!("current: {}", self.edit_buffer[line_idx]);
+        println!("new:");
+        io::stdout().flush()?;
+
+        let mut line_editor = LineEditor::<(), _>::new()
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        line_editor.set_helper(Some(()));
+        match line_editor.readline_with_initial("", (current_line, "")) {
+            Ok(new_line) => {
+                self.edit_buffer[line_idx] = new_line;
+                self.display_numbered_content();
+                Ok(())
+            }
+            Err(ReadlineError::Interrupted) => {
+                println!("\n[-] edit cancelled");
+                Ok(())
+            }
+            Err(ReadlineError::Eof) => {
+                println!("\n[-] edit cancelled");
+                Ok(())
+            }
+            Err(err) => {
+                println!("\nerror: {:?}", err);
+                Ok(())
+            }
+
+        }
+
+    }
+
+    fn save_edits(&mut self) {
+        self.content = self.edit_buffer.join("\n");
+        self.modified = true;
+        self.edit_mode = false;
+        self.invalidate_stats_cache();
+        println!("[+] changes saved");
+    }
+
+    fn cancel_edits(&mut self) {
+        self.edit_mode = false;
+        self.edit_buffer.clear();
+        println!("[-] changed your mind, huh?");
     }
 
     fn parse_command(&self, input: &str, in_multi_line: bool) -> Command {
@@ -395,6 +471,20 @@ impl Editor {
                 Some("q") | Some("quit") => Command::Quit,
                 Some("l") | Some("list") => Command::List,
                 Some("ls") | Some("files") => Command::ListFiles,
+                Some("edit") => Command::Edit,
+                Some("line") => {
+                    if parts.len() > 1 {
+                        if let Ok(num) = parts[1].parse::<usize>() {
+                            Command::EditLine(num)
+                        } else {
+                            Command::Invalid("invalid line number".to_string())
+                        }
+                    } else {
+                        Command::Invalid("line number required..".to_string())
+                    }
+                }
+                Some("save") if self.edit_mode => Command::EditSave,
+                Some("cancel") if self.edit_mode => Command::EditCancel,
                 Some("ml") => Command::MultiLine,
                 Some("n") => Command::NewNote(false),
                 Some("n!") => Command::NewNote(true),
@@ -403,7 +493,7 @@ impl Editor {
                     if parts.len() > 1 {
                         Command::Tag(parts[1].to_string())
                     } else {
-                        Command::Invalid("Tag name required".to_string())
+                        Command::Invalid("tag name required".to_string())
                     }
                 }
                 Some("tags") => Command::ListTags,
@@ -411,14 +501,14 @@ impl Editor {
                     if parts.len() > 1 {
                         Command::ListByTag(parts[1].to_string())
                     } else {
-                        Command::Invalid("Tag name required".to_string())
+                        Command::Invalid("tag name required".to_string())
                     }
                 }
                 Some("search") => {
                     if parts.len() > 1 {
                         Command::Search(parts[1..].join(" "))
                     } else {
-                        Command::Invalid("Search term required".to_string())
+                        Command::Invalid("search term required".to_string())
                     }
                 }
                 Some("save") => {
@@ -432,7 +522,7 @@ impl Editor {
                     if parts.len() > 1 {
                         Command::Load(parts[1].to_string())
                     } else {
-                        Command::Invalid("Filename required".to_string())
+                        Command::Invalid("filename required".to_string())
                     }
                 }
                 _ => Command::Invalid(input.to_string()),
@@ -456,11 +546,37 @@ impl Editor {
                         self.content.push('\n');
                         self.modified = true;
                         self.invalidate_stats_cache();
-                        println!("[+] Added");
+                        println!("[+] added");
                     }
                 }
                 Ok(true)
             }
+            Command::Edit => {
+                self.enter_edit_mode();
+                Ok(true)
+            }
+            Command::EditLine(num) => {
+                if self.edit_mode {
+                    self.edit_line(num)?;
+                } else {
+                    println!("[-] not in edit mode. use :edit");
+                }
+                Ok(true)
+            }
+
+            Command::EditSave => {
+                if self.edit_mode {
+                    self.save_edits();
+                }
+                Ok(true)
+            }
+            Command::EditCancel => {
+                if self.edit_mode {
+                    self.cancel_edits();
+                }
+                Ok(true)
+            }
+
             Command::MultiLine => {
                 if self.in_multi_line {
                     self.in_multi_line = false;
@@ -468,14 +584,13 @@ impl Editor {
                     self.modified = true;
                     self.invalidate_stats_cache();
                     println!(
-                        "[+] Multi-line input completed ({} lines)",
+                        "[+] multi-line input completed ({} lines)",
                         self.current_block.lines().count()
                     );
                     self.current_block.clear();
                 } else {
-                    println!("Multi-line mode started:");
-                    println!("  Type your content (one line at a time)");
-                    println!("  Use :ml again to finish");
+                    println!("multi-line mode started:");
+                    println!("  use :ml again to finish");
                     println!("---");
                     self.in_multi_line = true;
                     self.current_block.clear();
@@ -494,15 +609,15 @@ impl Editor {
                 }
 
                 if found {
-                    println!("\nSearch results for '{}':", term);
+                    println!("\nsearch results for '{}':", term);
                     println!("{}", "=".repeat(40));
                     for (line_num, content) in &results {
                         println!("{:>4}: {}", line_num, content);
                     }
                     println!("{}", "=".repeat(40));
-                    println!("Found {} matching line(s)\n", results.len());
+                    println!("found {} matching line(s)\n", results.len());
                 } else {
-                    println!("[-] No matches found for '{}'\n", term);
+                    println!("[-] no matches found for '{}'\n", term);
                 }
                 Ok(true)
             }
@@ -512,13 +627,13 @@ impl Editor {
             }
             Command::List => {
                 if self.content.is_empty() {
-                    println!("[-] Note is empty");
+                    println!("[-] note is empty");
                 } else {
-                    println!("\nCurrent note:");
+                    println!("\ncurrent note:");
                     println!("{}", "=".repeat(40));
                     println!("{}", self.content);
                     if !self.current_tags.is_empty() {
-                        println!("Tags: {}", self.current_tags.join(", "));
+                        println!("tags: {}", self.current_tags.join(", "));
                     }
                     println!("{}", "=".repeat(40));
                 }
@@ -531,18 +646,18 @@ impl Editor {
                     self.current_file = Some(file_path);
                     self.modified = false;
                     self.invalidate_stats_cache();
-                    println!("[+] Saved as {}.md", name);
-                    println!("  Use :list to view formatted content");
+                    println!("[+] saved as {}.md", name);
+                    println!("  use :list to view formatted content");
                 } else {
                     self.save_current()?;
-                    println!("  Use :list to view formatted content");
+                    println!("  use :list to view formatted content");
                 }
                 Ok(true)
             }
             Command::Load(name) => {
                 if self.modified {
-                    println!("[-] Current note has unsaved changes.");
-                    println!("    Save first with :save or force load with :n! then :load");
+                    println!("[-] current note has unsaved changes.");
+                    println!("    save first with :save or force load with :n! then :load");
                 } else {
                     self.load_file(&name)?;
                 }
@@ -551,15 +666,15 @@ impl Editor {
 
             Command::NewNote(force) => {
                 if self.modified && !force {
-                    println!("[-] Note has unsaved changes");
-                    println!("    Use :n! to start new without saving, or :save first");
+                    println!("[-] note has unsaved changes");
+                    println!("    use :n! to start new without saving, or :save first");
                 } else {
                     self.content.clear();
                     self.current_tags.clear();
                     self.current_file = None;
                     self.modified = false;
                     self.invalidate_stats_cache();
-                    println!("[+] Started new note");
+                    println!("[+] started new note");
                 }
                 Ok(true)
             }
@@ -577,8 +692,8 @@ impl Editor {
             }
             Command::ListFiles => {
                 self.list_saved_notes()?;
-                println!("Type ':load <name>' to load a note");
-                println!("Type ':save <name>' to save current note with a specific name");
+                println!("type ':load [name]' to load a note");
+                println!("type ':save [name]' to save current note with a specific name");
                 Ok(true)
             }
             Command::Help => {
@@ -593,7 +708,7 @@ impl Editor {
                 Ok(false)
             }
             Command::Invalid(cmd) => {
-                println!("[-] Invalid command: {}", cmd);
+                println!("[-] invalid command: {}", cmd);
                 println!("    Use :help to see available commands");
                 Ok(true)
             }
@@ -602,23 +717,27 @@ impl Editor {
 
     fn show_help(&self) {
         println!("\nCommands:");
-        println!("  :help              ► show available commands");
-        println!("  :quit              ► exit editor");
-        println!("  :n  / :n!          ► new note (with/without warning)");
-        println!("  :save [name]       ► save note (with optional name)");
-        println!("  :load [name]       ► load note");
-        println!("  :ls                ► list saved notes");
-        println!("  :list              ► show formatted note");
-        println!("  :stats             ► show note statistics");
-        println!("  :tag [name]        ► add tag to current note");
-        println!("  :tags              ► list all tags");
-        println!("  :tagged [tag]      ► list notes with specific tag");
-        println!("  :search [keyword]  ► search for keyword");
-        println!("  :ml                ► start/end multi-line input");
+        println!("  :quit               ► exit rustynotes");
+        println!("  :n  / :n!           ► new note (with/without warning)");
+        println!("  :save [name]        ► save note (with optional name)");
+        println!("  :load [name]        ► load note");
+        println!("  :ls                 ► list saved notes");
+        println!("  :list               ► show current note");
+        println!("  :stats              ► show note statistics");
+        println!("  :tag [name]         ► add tag to current note");
+        println!("    :tags             ► list all tags");
+        println!("    :tagged [tag]     ► list notes with specific tag");
+        println!("  :search [keyword]   ► search for keyword");
+        println!("  :ml                 ► start/end multi-line input");
+        println!("  :edit               ► start edit mode");
+        println!("    :line N           ► select line to edit");
+        println!("    :save             ► save changes");
+        println!("    :cancel           ► discard changes");
+        println!("                                  ↳ written by r00tkid");
     }
 
     fn list_saved_notes(&self) -> io::Result<()> {
-        println!("\nSaved Notes:");
+        println!("\nsaved notes:");
         println!("{}", "=".repeat(40));
 
         let mut notes: Vec<_> = fs::read_dir(&self.notes_dir)?
@@ -627,7 +746,7 @@ impl Editor {
             .collect();
 
         if notes.is_empty() {
-            println!("[-] No saved notes found.");
+            println!("[-] no saved notes found.");
             println!("{}", "=".repeat(40));
             return Ok(());
         }
@@ -715,9 +834,9 @@ impl Editor {
         }
 
         if all_tags.is_empty() {
-            println!("[-] No tags found");
+            println!("[-] no tags found");
         } else {
-            println!("\nAvailable tags:");
+            println!("\navailable tags:");
             println!("{}", "=".repeat(40));
             let mut tags: Vec<_> = all_tags.iter().collect();
             tags.sort();
@@ -733,7 +852,7 @@ impl Editor {
         let tag = tag.to_lowercase();
         let mut found = false;
 
-        println!("\nNotes tagged with '{}':", tag);
+        println!("\nnotes tagged with '{}':", tag);
         println!("{}", "=".repeat(40));
 
         for entry in fs::read_dir(&self.notes_dir)? {
@@ -759,7 +878,7 @@ impl Editor {
         }
 
         if !found {
-            println!("[-] No notes found with tag: {}", tag);
+            println!("[-] no notes found with tag: {}", tag);
         }
         println!("{}", "=".repeat(40));
         Ok(())
@@ -768,26 +887,34 @@ impl Editor {
 
 fn main() -> io::Result<()> {
     let mut editor = Editor::new()?;
+    let mut line_editor = LineEditor::<(), _>::new().map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
     println!("rustynotes: a simple cli note-taking tool");
     println!("type :help for commands\n");
 
     loop {
-        if editor.in_multi_line {
-            print!("  ");
-        } else {
-            print!(":> ");
-        }
-        io::stdout().flush()?;
-
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-
-        let command = editor.parse_command(&input, editor.in_multi_line);
-        if !editor.execute_command(command)? {
-            break;
+        let prompt = if editor.in_multi_line { " " } else { ":> " }; // i think this works
+        match line_editor.readline(prompt) {
+            Ok(line) => {
+                let _ = line_editor.add_history_entry(line.as_str());
+                let command = editor.parse_command(&line, editor.in_multi_line);
+                if !editor.execute_command(command)? {
+                    break;
+                }
+            }
+            Err(ReadlineError::Interrupted) => {
+                println!("ctrl-c");
+                break;
+            }
+            Err(ReadlineError::Eof) => {
+                println!("ctrl-d");
+                break;
+            }
+            Err(err) => {
+                println!("error: {:?}", err);
+                break;
+            }
         }
     }
-
     Ok(())
 }
