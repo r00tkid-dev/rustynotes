@@ -74,7 +74,7 @@ rustynotes
 ### First Time Setup
 On first run, rustynotes creates a `~/.notes` directory to store your notes.
 
-## 📋 Commands
+## Commands
 
 ### Core Operations
 ```bash
